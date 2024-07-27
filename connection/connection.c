@@ -3,7 +3,6 @@
 #include <freertos/semphr.h>
 #include <string.h>
 
-#include "message.h"
 #include "connection.h"
 
 /***************************
@@ -41,16 +40,24 @@ typedef struct {
 ***** LOCAL VARIABLES ******
 ***************************/
 
-static SemaphoreHandle_t mutex;
-static connection_t connection[MAX_CLIENT_CONNECTIONS];
-static con_id_t next_con = 1;
+static msg_type_t           msg_type;
+static SemaphoreHandle_t    mutex;
+static connection_t         connection[MAX_CLIENT_CONNECTIONS];
+static con_id_t             next_con = 1;
 
 /***************************
 ***** PUBLIC FUNCTIONS *****
 ***************************/
 
 void con_init(void) {
+    assert(!msg_type);
+    msg_type = msg_register();
     mutex = xSemaphoreCreateMutex();
+}
+
+msg_type_t con_msg_type(void) {
+    assert(msg_type);
+    return msg_type;
 }
 
 void con_create(con_mode_t mode, int sockfd) {
@@ -62,7 +69,7 @@ void con_create(con_mode_t mode, int sockfd) {
                 connection[i].mode = mode;
                 connection[i].sockfd = sockfd;
                 LOGI("create con %lu mode %d socket %d", connection[i].con, connection[i].mode, connection[i].sockfd);
-                msg_send_value(MSG_CON, CON_CONNECTED);
+                msg_send_value(msg_type, CON_CONNECTED);
                 created = true;
                 break;
             }
@@ -81,7 +88,7 @@ void con_delete(int sockfd) {
             if (connection[i].con && connection[i].sockfd == sockfd) {
                 LOGI("delete con %lu socket %d", connection[i].con, connection[i].sockfd);
                 memset(&connection[i], 0, sizeof(connection_t));
-                msg_send_value(MSG_CON, CON_DISCONNECTED);
+                msg_send_value(msg_type, CON_DISCONNECTED);
                 deleted = true;
                 break;
             }

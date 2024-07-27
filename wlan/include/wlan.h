@@ -1,11 +1,10 @@
 #pragma once
 
+#include "message.h"
+
 /********************
 ***** CONSTANTS *****
 ********************/
-
-#define MSG_WLAN        0x0002
-#define MSG_WLAN_INT    0x0004
 
 #define WLAN_CONNECTED       1
 #define WLAN_DISCONNECTED    2
@@ -28,4 +27,6 @@
 ***** FUNCTIONS *****
 ********************/
 
-void wlan_init(void);
+void        wlan_init(void);
+msg_type_t  wlan_msg_type(void);
+void        wlan_toggle_mode(void);

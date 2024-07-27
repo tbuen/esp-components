@@ -3,8 +3,7 @@
 #include <mdns.h>
 
 #include "message.h"
-#include "button.h"
-#include "http_srv.h"
+#include "http_server.h"
 #include "wlan.h"
 
 /***************************
@@ -17,10 +16,11 @@
 
 #define SCAN_MAX_AP  20
 
-#define WLAN_INT_AP_STARTED     1
-#define WLAN_INT_STA_STARTED    2
-#define WLAN_INT_CONNECTED      3
-#define WLAN_INT_DISCONNECTED   4
+#define WLAN_INT_MODE_REQ       1
+#define WLAN_INT_AP_STARTED     2
+#define WLAN_INT_STA_STARTED    3
+#define WLAN_INT_CONNECTED      4
+#define WLAN_INT_DISCONNECTED   5
 
 /***************************
 ***** MACROS ***************
@@ -54,6 +54,8 @@ static void wlan_task(void *param);
 ***************************/
 
 static TaskHandle_t handle;
+static msg_type_t   msg_type;
+static msg_type_t   msg_type_int;
 static msg_handle_t msg_handle;
 
 /***************************
@@ -61,9 +63,14 @@ static msg_handle_t msg_handle;
 ***************************/
 
 void wlan_init(void) {
-    if (handle) return;
+    assert(!handle);
+    assert(!msg_type);
+    assert(!msg_type_int);
 
-    msg_handle = msg_register(MSG_BUTTON|MSG_WLAN_INT);
+    msg_type = msg_register();
+    msg_type_int = msg_register();
+
+    msg_handle = msg_listen(msg_type_int);
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -97,6 +104,16 @@ void wlan_init(void) {
     }
 }
 
+msg_type_t  wlan_msg_type(void) {
+    assert(msg_type);
+    return msg_type;
+}
+
+void wlan_toggle_mode(void) {
+    assert(msg_type_int);
+    msg_send_value(msg_type_int, WLAN_INT_MODE_REQ);
+}
+
 /***************************
 ***** LOCAL FUNCTIONS ******
 ***************************/
@@ -123,7 +140,7 @@ static void wlan_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     if (event_base == WIFI_EVENT) {
         switch (event_id) {
             case WIFI_EVENT_STA_START:
-                msg_send_value(MSG_WLAN_INT, WLAN_INT_STA_STARTED);
+                msg_send_value(msg_type_int, WLAN_INT_STA_STARTED);
                 break;
             case WIFI_EVENT_STA_STOP:
                 break;
@@ -133,21 +150,21 @@ static void wlan_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                 break;
             case WIFI_EVENT_STA_DISCONNECTED:
                 LOGI("STA disconnected, reason: %d", ((wifi_event_sta_disconnected_t*)event_data)->reason);
-                msg_send_value(MSG_WLAN_INT, WLAN_INT_DISCONNECTED);
-                msg_send_value(MSG_WLAN, WLAN_DISCONNECTED);
+                msg_send_value(msg_type_int, WLAN_INT_DISCONNECTED);
+                msg_send_value(msg_type, WLAN_DISCONNECTED);
                 break;
             case WIFI_EVENT_AP_START:
-                msg_send_value(MSG_WLAN_INT, WLAN_INT_AP_STARTED);
-                msg_send_value(MSG_WLAN, WLAN_AP_STARTED);
+                msg_send_value(msg_type_int, WLAN_INT_AP_STARTED);
+                msg_send_value(msg_type, WLAN_AP_STARTED);
                 break;
             case WIFI_EVENT_AP_STOP:
-                msg_send_value(MSG_WLAN, WLAN_AP_STOPPED);
+                msg_send_value(msg_type, WLAN_AP_STOPPED);
                 break;
             case WIFI_EVENT_AP_STACONNECTED:
-                msg_send_value(MSG_WLAN, WLAN_AP_CONNECTED);
+                msg_send_value(msg_type, WLAN_AP_CONNECTED);
                 break;
             case WIFI_EVENT_AP_STADISCONNECTED:
-                msg_send_value(MSG_WLAN, WLAN_AP_DISCONNECTED);
+                msg_send_value(msg_type, WLAN_AP_DISCONNECTED);
                 break;
             default:
                 break;
@@ -159,8 +176,8 @@ static void wlan_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             {
                 ip_event_got_ip_t *event = (ip_event_got_ip_t*)event_data;
                 LOGI("GOT IP: " IPSTR, IP2STR(&event->ip_info.ip));
-                msg_send_value(MSG_WLAN_INT, WLAN_INT_CONNECTED);
-                msg_send_value(MSG_WLAN, WLAN_CONNECTED);
+                msg_send_value(msg_type_int, WLAN_INT_CONNECTED);
+                msg_send_value(msg_type, WLAN_CONNECTED);
                 break;
             }
             case IP_EVENT_STA_LOST_IP:
@@ -179,7 +196,7 @@ static void wlan_start_sta(void) {
 
 static void wlan_stop_sta(void) {
     ESP_ERROR_CHECK(esp_wifi_disconnect());
-    wlan_scan();
+    //wlan_scan();
     ESP_ERROR_CHECK(esp_wifi_stop());
 }
 
@@ -208,7 +225,7 @@ static void wlan_scan(void) {
     wifi_scan_config_t config = {
         .scan_type = WIFI_SCAN_TYPE_ACTIVE,
     };
-    msg_send_value(MSG_WLAN, WLAN_SCAN_STARTED);
+    msg_send_value(msg_type, WLAN_SCAN_STARTED);
     ESP_ERROR_CHECK(esp_wifi_scan_start(&config, true));
     uint16_t number = SCAN_MAX_AP;
     wifi_ap_record_t records[SCAN_MAX_AP];
@@ -217,7 +234,7 @@ static void wlan_scan(void) {
     for (int i = 0; i < number; ++i) {
         LOGI("FOUND AP: SSID %s CH %d RSSI %d WPS %d AUTH %d, CC %s", records[i].ssid, records[i].primary, records[i].rssi, records[i].wps, records[i].authmode, records[i].country.cc);
     }
-    msg_send_value(MSG_WLAN, WLAN_SCAN_STOPPED);
+    msg_send_value(msg_type, WLAN_SCAN_STOPPED);
 }
 
 /*static void wlan_con(const uint8_t *ssid, const uint8_t *password) {
@@ -238,25 +255,24 @@ static void wlan_scan(void) {
 }*/
 
 static void wlan_task(void *param) {
+    wifi_mode_t mode;
     wlan_start_sta();
     for (;;) {
         msg_t msg = msg_receive(msg_handle);
-        if (msg.type == MSG_BUTTON) {
-            if (msg.value == BUTTON_PRESSED) {
-                wifi_mode_t mode;
-                ESP_ERROR_CHECK(esp_wifi_get_mode(&mode));
-                if (mode == WIFI_MODE_STA) {
-                    http_stop();
-                    wlan_stop_sta();
-                    wlan_start_ap();
-                } else if (mode == WIFI_MODE_AP) {
-                    http_stop();
-                    wlan_stop_ap();
-                    wlan_start_sta();
-                }
-            }
-        } else if (msg.type == MSG_WLAN_INT) {
+        if (msg.type == msg_type_int) {
             switch (msg.value) {
+                case WLAN_INT_MODE_REQ:
+                    ESP_ERROR_CHECK(esp_wifi_get_mode(&mode));
+                    if (mode == WIFI_MODE_STA) {
+                        http_stop();
+                        wlan_stop_sta();
+                        wlan_start_ap();
+                    } else if (mode == WIFI_MODE_AP) {
+                        http_stop();
+                        wlan_stop_ap();
+                        wlan_start_sta();
+                    }
+                    break;
                 case WLAN_INT_STA_STARTED:
                     wlan_scan();
                     break;

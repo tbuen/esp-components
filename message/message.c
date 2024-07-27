@@ -39,6 +39,7 @@ typedef struct {
 ***************************/
 
 static receiver_t receiver[MAX_HANDLES];
+static uint8_t next_type;
 static msg_handle_t next_handle;
 static SemaphoreHandle_t mutex;
 
@@ -50,7 +51,13 @@ void msg_init(void) {
     mutex = xSemaphoreCreateMutex();
 }
 
-msg_handle_t msg_register(msg_type_t msg_types) {
+msg_type_t msg_register(void) {
+    assert(next_type < sizeof(msg_type_t) * 8);
+    msg_type_t type = 1 << next_type++;
+    return type;
+}
+
+msg_handle_t msg_listen(msg_type_t msg_types) {
     xSemaphoreTake(mutex, portMAX_DELAY);
     assert(next_handle < MAX_HANDLES);
     msg_handle_t handle = next_handle++;
@@ -90,10 +97,12 @@ void msg_send_ptr(msg_type_t msg_type, void *ptr, msg_free_t free) {
 }
 
 void msg_free(msg_t *msg) {
+    assert(msg->ptr);
     if (msg->free) {
         msg->free(msg->ptr);
     }
     free(msg->ptr);
+    msg->ptr = NULL;
 }
 
 msg_t msg_receive(msg_handle_t handle) {

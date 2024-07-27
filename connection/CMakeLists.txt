@@ -1,3 +1,4 @@
 idf_component_register(SRCS "connection.c"
                        INCLUDE_DIRS "include"
-                       PRIV_REQUIRES message log)
+                       REQUIRES message
+                       PRIV_REQUIRES log)

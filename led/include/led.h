@@ -1,12 +1,8 @@
 #pragma once
 
-#include "connection.h"
-
 /********************
 ***** CONSTANTS *****
 ********************/
-
-#define MSG_WS_RECV 0x0010
 
 /********************
 ***** MACROS ********
@@ -16,14 +12,22 @@
 ***** TYPES *********
 ********************/
 
-typedef struct {
-    con_id_t con;
-    char *text;
-} ws_msg_t;
+typedef enum {
+    LED_RED,
+    LED_GREEN,
+    LED_YELLOW,
+    LED_BLUE
+} led_color_t;
+
+typedef enum {
+    LED_OFF,
+    LED_LOW,
+    LED_HIGH,
+} led_state_t;
 
 /********************
 ***** FUNCTIONS *****
 ********************/
 
-void http_start(con_mode_t mode);
-void http_stop(void);
+void led_init(void);
+void led_set(led_color_t color, led_state_t state);

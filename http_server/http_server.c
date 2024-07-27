@@ -2,8 +2,7 @@
 #include <esp_log.h>
 #include <unistd.h>
 
-#include "message.h"
-#include "http_srv.h"
+#include "http_server.h"
 
 /***************************
 ***** CONSTANTS ************
@@ -38,9 +37,10 @@ static void free_ws_msg(void *ptr);
 ***** LOCAL VARIABLES ******
 ***************************/
 
-static httpd_handle_t server = NULL;
+static httpd_handle_t       server;
+static msg_type_t           msg_type_ws_recv;
 
-static const httpd_uri_t websocket = {
+static const httpd_uri_t    websocket = {
     .uri = "/websocket",
     .method = HTTP_GET,
     .handler = &websocket_handler,
@@ -53,8 +53,20 @@ static const httpd_uri_t websocket = {
 ***** PUBLIC FUNCTIONS *****
 ***************************/
 
+void http_init(void) {
+    assert(!server);
+    assert(!msg_type_ws_recv);
+    msg_type_ws_recv = msg_register();
+}
+
+msg_type_t http_msg_type_ws_recv(void) {
+    assert(msg_type_ws_recv);
+    return msg_type_ws_recv;
+}
+
 void http_start(con_mode_t mode) {
-    if (server) return;
+    assert(msg_type_ws_recv);
+    assert(!server);
 
     con_mode_t *mode_ptr = malloc(sizeof(con_mode_t));
     *mode_ptr = mode;
@@ -76,6 +88,7 @@ void http_start(con_mode_t mode) {
 }
 
 void http_stop(void) {
+    assert(msg_type_ws_recv);
     if (!server) return;
 
     size_t fds = MAX_CLIENT_CONNECTIONS;
@@ -102,7 +115,7 @@ void http_stop(void) {
     LOGI("stopped");
 }
 
-void ws_send(con_id_t con, const char *text) {
+/*void ws_send(con_id_t con, const char *text) {
     if (!server) return;
 
     int sockfd;
@@ -118,7 +131,7 @@ void ws_send(con_id_t con, const char *text) {
         };
         httpd_ws_send_data(server, sockfd, &ws_pkt);
     }
-}
+}*/
 
 /***************************
 ***** LOCAL FUNCTIONS ******
@@ -167,7 +180,7 @@ static esp_err_t websocket_handler(httpd_req_t *req) {
                 ws_msg_t *ws_msg = calloc(1, sizeof(ws_msg_t));
                 ws_msg->con = con;
                 ws_msg->text = (char*)buf;
-                msg_send_ptr(MSG_WS_RECV, ws_msg, &free_ws_msg);
+                msg_send_ptr(msg_type_ws_recv, ws_msg, &free_ws_msg);
             }
         }
     }

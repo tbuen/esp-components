@@ -1,12 +1,11 @@
 #pragma once
 
 #include "message.h"
+#include "connection.h"
 
 /********************
 ***** CONSTANTS *****
 ********************/
-
-#define BUTTON_PRESSED  1
 
 /********************
 ***** MACROS ********
@@ -16,9 +15,16 @@
 ***** TYPES *********
 ********************/
 
+typedef struct {
+    con_id_t con;
+    char *text;
+} ws_msg_t;
+
 /********************
 ***** FUNCTIONS *****
 ********************/
 
-void        button_init(void);
-msg_type_t  button_msg_type(void);
+void        http_init(void);
+void        http_start(con_mode_t mode);
+void        http_stop(void);
+msg_type_t  http_msg_type_ws_recv(void);

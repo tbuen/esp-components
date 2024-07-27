@@ -3,7 +3,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-#include "message.h"
 #include "button.h"
 
 /***************************
@@ -44,13 +43,17 @@ static void button_task(void *param);
 ***************************/
 
 static TaskHandle_t handle;
+static msg_type_t   msg_type;
 
 /***************************
 ***** PUBLIC FUNCTIONS *****
 ***************************/
 
 void button_init(void) {
-    if (handle) return;
+    assert(!handle);
+    assert(!msg_type);
+
+    msg_type = msg_register();
 
     gpio_config_t io_conf = {};
 
@@ -64,6 +67,11 @@ void button_init(void) {
     }
 }
 
+msg_type_t button_msg_type(void) {
+    assert(msg_type);
+    return msg_type;
+}
+
 /***************************
 ***** LOCAL FUNCTIONS ******
 ***************************/
@@ -71,12 +79,12 @@ void button_init(void) {
 static void button_task(void *param) {
     uint8_t button_cnt = 0;
     for (;;) {
-        if (gpio_get_level(BUTTON_PIN) == BUTTON_ACTIVE ) {
+        if (gpio_get_level(BUTTON_PIN) == BUTTON_ACTIVE) {
             if (button_cnt < BUTTON_DELAY_MS / 10) {
                 button_cnt++;
                 if (button_cnt == BUTTON_DELAY_MS / 10) {
                     LOGI("BUTTON pressed!");
-                    msg_send_value(MSG_BUTTON, BUTTON_PRESSED);
+                    msg_send_value(msg_type, BUTTON_PRESSED);
                 }
             }
         } else {
