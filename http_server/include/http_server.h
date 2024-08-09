@@ -25,6 +25,6 @@ typedef struct {
 ********************/
 
 void        http_init(void);
+msg_type_t  http_msg_type_ws_recv(void);
 void        http_start(con_mode_t mode);
 void        http_stop(void);
-msg_type_t  http_msg_type_ws_recv(void);

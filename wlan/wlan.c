@@ -1,6 +1,7 @@
 #include <esp_log.h>
 #include <esp_wifi.h>
 #include <mdns.h>
+#include <string.h>
 
 #include "message.h"
 #include "http_server.h"
@@ -53,10 +54,13 @@ static void wlan_task(void *param);
 ***** LOCAL VARIABLES ******
 ***************************/
 
-static TaskHandle_t handle;
-static msg_type_t   msg_type;
-static msg_type_t   msg_type_int;
-static msg_handle_t msg_handle;
+static TaskHandle_t         handle;
+static msg_type_t           msg_type;
+static msg_type_t           msg_type_int;
+static msg_handle_t         msg_handle;
+static SemaphoreHandle_t    ap_mutex;
+static uint16_t             ap_count;
+static wlan_ap_t            ap_list[SCAN_MAX_AP];
 
 /***************************
 ***** PUBLIC FUNCTIONS *****
@@ -71,6 +75,8 @@ void wlan_init(void) {
     msg_type_int = msg_register();
 
     msg_handle = msg_listen(msg_type_int);
+
+    ap_mutex = xSemaphoreCreateMutex();
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -92,11 +98,11 @@ void wlan_init(void) {
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wlan_event_handler, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, ESP_EVENT_ANY_ID, &wlan_event_handler, NULL, NULL));
 
-    ESP_ERROR_CHECK(esp_netif_set_hostname(intf_ap, "esp32-audio"));
-    ESP_ERROR_CHECK(esp_netif_set_hostname(intf_sta, "esp32-audio"));
+    ESP_ERROR_CHECK(esp_netif_set_hostname(intf_ap, CONFIG_WLAN_HOSTNAME));
+    ESP_ERROR_CHECK(esp_netif_set_hostname(intf_sta, CONFIG_WLAN_HOSTNAME));
 
     ESP_ERROR_CHECK(mdns_init());
-    ESP_ERROR_CHECK(mdns_hostname_set("esp32-audio"));
+    ESP_ERROR_CHECK(mdns_hostname_set(CONFIG_WLAN_HOSTNAME));
     ESP_ERROR_CHECK(mdns_service_add("audio", "_audio-jsonrpc-ws", "_tcp", 80, NULL, 0));
 
     if (xTaskCreatePinnedToCore(&wlan_task, "wlan-task", STACK_SIZE, NULL, TASK_PRIO, &handle, TASK_CORE) != pdPASS) {
@@ -114,21 +120,29 @@ void wlan_toggle_mode(void) {
     msg_send_value(msg_type_int, WLAN_INT_MODE_REQ);
 }
 
+bool wlan_get_scan_result(uint8_t *cnt, wlan_ap_t **ap) {
+    bool ret = false;
+    assert(cnt);
+    assert(ap);
+    *cnt = 0;
+    *ap = NULL;
+    if (xSemaphoreTake(ap_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        *cnt = ap_count;
+        *ap = ap_list;
+        ret = true;
+    }
+    return ret;
+}
+
+void wlan_free_scan_result(void) {
+    xSemaphoreGive(ap_mutex);
+}
+
 /***************************
 ***** LOCAL FUNCTIONS ******
 ***************************/
 
-/*void wlan_set_mode(wlan_mode_t m) {
-    if (m == WLAN_MODE_STA) {
-        request_t request = { WLAN_REQ_STA, NULL };
-        xQueueSendToBack(request_queue, &request, 0);
-    } else if (m == WLAN_MODE_AP) {
-        request_t request = { WLAN_REQ_AP, NULL };
-        xQueueSendToBack(request_queue, &request, 0);
-    }
-}
-
-void wlan_connect(const uint8_t *ssid, const uint8_t *password) {
+/*void wlan_connect(const uint8_t *ssid, const uint8_t *password) {
     wifi_msg_t *wifi_msg = calloc(1, sizeof(wifi_msg_t));
     memcpy(wifi_msg->ssid, ssid, sizeof(wifi_msg->ssid));
     memcpy(wifi_msg->password, password, sizeof(wifi_msg->password));
@@ -196,16 +210,15 @@ static void wlan_start_sta(void) {
 
 static void wlan_stop_sta(void) {
     ESP_ERROR_CHECK(esp_wifi_disconnect());
-    //wlan_scan();
     ESP_ERROR_CHECK(esp_wifi_stop());
 }
 
 static void wlan_start_ap(void) {
     wifi_config_t wifi_config = {
         .ap = {
-            .ssid = "esp32-audio",
+            .ssid = CONFIG_WLAN_SSID,
             .channel = 6,
-            .password = "audio-esp",
+            .password = CONFIG_WLAN_KEY,
             .max_connection = 1,
             .authmode = WIFI_AUTH_WPA2_PSK
         },
@@ -227,12 +240,19 @@ static void wlan_scan(void) {
     };
     msg_send_value(msg_type, WLAN_SCAN_STARTED);
     ESP_ERROR_CHECK(esp_wifi_scan_start(&config, true));
-    uint16_t number = SCAN_MAX_AP;
-    wifi_ap_record_t records[SCAN_MAX_AP];
-    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&number, records));
-    LOGI("found %d APs", number);
-    for (int i = 0; i < number; ++i) {
-        LOGI("FOUND AP: SSID %s CH %d RSSI %d WPS %d AUTH %d, CC %s", records[i].ssid, records[i].primary, records[i].rssi, records[i].wps, records[i].authmode, records[i].country.cc);
+    if (xSemaphoreTake(ap_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        wifi_ap_record_t records[SCAN_MAX_AP];
+        ap_count = SCAN_MAX_AP;
+        ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&ap_count, records));
+        LOGI("found %d APs", ap_count);
+        for (int i = 0; i < ap_count; ++i) {
+            LOGI("FOUND AP: SSID %s CH %d RSSI %d WPS %d AUTH %d, CC %s", records[i].ssid, records[i].primary, records[i].rssi, records[i].wps, records[i].authmode, records[i].country.cc);
+            memcpy(ap_list[i].ssid, records[i].ssid, sizeof(ap_list[i].ssid));
+            ap_list[i].rssi = records[i].rssi;
+        }
+        xSemaphoreGive(ap_mutex);
+    } else {
+        ESP_ERROR_CHECK(esp_wifi_clear_ap_list());
     }
     msg_send_value(msg_type, WLAN_SCAN_STOPPED);
 }
@@ -289,23 +309,6 @@ static void wlan_task(void *param) {
                     break;
             }
         }
-        /*request_t request;
-        if (xQueueReceive(request_queue, &request, portMAX_DELAY) == pdTRUE) {
-            switch (request.req) {
-                case WLAN_REQ_STA:
-                    if (mode == WIFI_MODE_AP) {
-                        wlan_ap(false);
-                    }
-                    wlan_sta(true);
-                    mode = WIFI_MODE_STA;
-                    break;
-                case WLAN_REQ_AP:
-                    if (mode == WIFI_MODE_STA) {
-                        wlan_sta(false);
-                    }
-                    wlan_ap(true);
-                    mode = WIFI_MODE_AP;
-                    break;
 #if 0
                 case WLAN_REQ_CONNECT:
                     if (   (mode == WIFI_MODE_STA)
@@ -316,9 +319,5 @@ static void wlan_task(void *param) {
                     }
                     break;
 #endif
-                default:
-                    break;
-            }
-        }*/
     }
 }

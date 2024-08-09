@@ -1,0 +1,21 @@
+menu "WLAN"
+
+    config WLAN_HOSTNAME
+        string "hostname"
+        default "esp32"
+        help
+            Hostname for netif and mdns.
+
+    config WLAN_SSID
+        string "SSID"
+        default "esp32"
+        help
+            WLAN SSID
+
+    config WLAN_KEY
+        string "KEY"
+        default "esp32"
+        help
+            WLAN KEY
+
+endmenu
