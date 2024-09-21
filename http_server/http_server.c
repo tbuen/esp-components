@@ -115,8 +115,9 @@ void http_stop(void) {
     LOGI("stopped");
 }
 
-/*void ws_send(con_id_t con, const char *text) {
-    if (!server) return;
+void http_send_ws_msg(con_id_t con, const char *text) {
+    assert(server);
+    assert(text);
 
     int sockfd;
     if (con_get_sock(con, &sockfd)) {
@@ -131,7 +132,7 @@ void http_stop(void) {
         };
         httpd_ws_send_data(server, sockfd, &ws_pkt);
     }
-}*/
+}
 
 /***************************
 ***** LOCAL FUNCTIONS ******
