@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <string.h>
 
 #include "json_rpc.h"
@@ -73,12 +74,30 @@ bool json_rpc_parse_request(const char *text, json_rpc_request_t **request, char
     return ret;
 }
 
+void json_rpc_build_response(cJSON *result, /*uint32_t id,*/ char **response) {
+    cJSON *resp = cJSON_CreateObject();
+
+    cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
+    cJSON_AddItemToObject(resp, "result", result);
+    // TODO
+    cJSON_AddNumberToObject(resp, "id", 0);
+
+    *response = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
+}
+
 void json_rpc_build_error_method_not_found(uint32_t id, char **error) {
     *error = json_rpc_build_error_msg(JSON_RPC_METHOD_NOT_FOUND, &id);
 }
 
 void json_rpc_build_error_invalid_params(uint32_t id, char **error) {
     *error = json_rpc_build_error_msg(JSON_RPC_INVALID_PARAMS, &id);
+}
+
+void json_rpc_build_error(uint8_t code, /*uint32_t id,*/ char **error) {
+    // TODO
+    uint32_t id = 0;
+    *error = json_rpc_build_error_msg(-32000 + code, &id);
 }
 
 /***************************

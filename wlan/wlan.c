@@ -110,7 +110,7 @@ void wlan_init(void) {
     }
 }
 
-msg_type_t  wlan_msg_type(void) {
+msg_type_t wlan_msg_type(void) {
     assert(msg_type);
     return msg_type;
 }
