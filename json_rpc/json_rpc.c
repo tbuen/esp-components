@@ -1,4 +1,4 @@
-#include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "json_rpc.h"
@@ -25,23 +25,31 @@
 ***** LOCAL FUNCTIONS ******
 ***************************/
 
-static char *json_rpc_build_error_msg(int16_t code, uint32_t *rpc_id);
+static char *json_rpc_build_response(cJSON *result, int id);
+static char *json_rpc_build_error_msg(int16_t code, int *id);
 static char *json_rpc_error_message(int16_t code);
 
 /***************************
 ***** LOCAL VARIABLES ******
 ***************************/
 
+static const json_rpc_config_t *config;
+
 /***************************
 ***** PUBLIC FUNCTIONS *****
 ***************************/
 
-bool json_rpc_parse_request(const char *text, json_rpc_request_t **request, char **error) {
-    bool ret = false;
-    uint32_t rpc_id;
-    uint32_t *rpc_id_ptr = NULL;
+void json_rpc_init(const json_rpc_config_t *cfg) {
+    config = cfg;
+}
 
-    cJSON *req = cJSON_Parse(text);
+char *json_rpc_handle_request(const char *request) {
+    assert(config);
+
+    int *idptr = NULL;
+    char *response = NULL;
+
+    cJSON *req = cJSON_Parse(request);
 
     if (req) {
         cJSON *jsonrpc = cJSON_GetObjectItemCaseSensitive(req, "jsonrpc");
@@ -49,62 +57,65 @@ bool json_rpc_parse_request(const char *text, json_rpc_request_t **request, char
         cJSON *params = cJSON_GetObjectItemCaseSensitive(req, "params");
         cJSON *id = cJSON_GetObjectItemCaseSensitive(req, "id");
         if (cJSON_IsNumber(id)) {
-            rpc_id = id->valueint;
-            rpc_id_ptr = &rpc_id;
+            idptr = &id->valueint;
         }
         if (   cJSON_IsString(jsonrpc)
             && !strcmp(jsonrpc->valuestring, "2.0")
             && cJSON_IsString(method)
             && (!params || cJSON_IsArray(params) || cJSON_IsObject(params))
-            && rpc_id_ptr) {
-            *request = malloc(sizeof(json_rpc_request_t));
-            (*request)->method = malloc(strlen(method->valuestring)+1);
-            strcpy((*request)->method, method->valuestring);
-            (*request)->params = cJSON_DetachItemViaPointer(req, params);
-            (*request)->id = rpc_id;
-            ret = true;
+            && idptr) {
+            const json_rpc_config_t *cfg = config;
+            while (cfg->method) {
+                if (!strcmp(method->valuestring, cfg->method)) {
+                    break;
+                }
+                cfg++;
+            }
+            if (cfg->method && cfg->handler && cfg->result_builder) {
+                void *parameters = NULL;
+                if (cfg->param_parser && params) {
+                    if (!(parameters = cfg->param_parser(params))) {
+                        response = json_rpc_build_error_msg(JSON_RPC_INVALID_PARAMS, idptr);
+                    }
+                } else if (!cfg->param_parser && !params) {
+                } else {
+                    response = json_rpc_build_error_msg(JSON_RPC_INVALID_PARAMS, idptr);
+                }
+                if (!response) {
+                    void *result = NULL;
+                    cfg->handler(parameters, &result);
+                    response = json_rpc_build_response(cfg->result_builder(result), *idptr);
+                }
+            } else {
+                response = json_rpc_build_error_msg(JSON_RPC_METHOD_NOT_FOUND, idptr);
+            }
         } else {
-            *error = json_rpc_build_error_msg(JSON_RPC_INVALID_REQUEST, rpc_id_ptr);
+            response = json_rpc_build_error_msg(JSON_RPC_INVALID_REQUEST, idptr);
         }
         cJSON_Delete(req);
     } else {
-        *error = json_rpc_build_error_msg(JSON_RPC_PARSE_ERROR, rpc_id_ptr);
+        response = json_rpc_build_error_msg(JSON_RPC_PARSE_ERROR, idptr);
     }
-
-    return ret;
-}
-
-void json_rpc_build_response(cJSON *result, /*uint32_t id,*/ char **response) {
-    cJSON *resp = cJSON_CreateObject();
-
-    cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
-    cJSON_AddItemToObject(resp, "result", result);
-    // TODO
-    cJSON_AddNumberToObject(resp, "id", 0);
-
-    *response = cJSON_PrintUnformatted(resp);
-    cJSON_Delete(resp);
-}
-
-void json_rpc_build_error_method_not_found(uint32_t id, char **error) {
-    *error = json_rpc_build_error_msg(JSON_RPC_METHOD_NOT_FOUND, &id);
-}
-
-void json_rpc_build_error_invalid_params(uint32_t id, char **error) {
-    *error = json_rpc_build_error_msg(JSON_RPC_INVALID_PARAMS, &id);
-}
-
-void json_rpc_build_error(uint8_t code, /*uint32_t id,*/ char **error) {
-    // TODO
-    uint32_t id = 0;
-    *error = json_rpc_build_error_msg(-32000 + code, &id);
+    return response;
 }
 
 /***************************
 ***** LOCAL FUNCTIONS ******
 ***************************/
 
-static char *json_rpc_build_error_msg(int16_t code, uint32_t *rpc_id) {
+static char *json_rpc_build_response(cJSON *result, int id) {
+    cJSON *resp = cJSON_CreateObject();
+
+    cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
+    cJSON_AddItemToObject(resp, "result", result);
+    cJSON_AddNumberToObject(resp, "id", id);
+
+    char *response = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
+    return response;
+}
+
+static char *json_rpc_build_error_msg(int16_t code, int *id) {
     cJSON *resp = cJSON_CreateObject();
     cJSON *err = cJSON_CreateObject();
 
@@ -112,15 +123,16 @@ static char *json_rpc_build_error_msg(int16_t code, uint32_t *rpc_id) {
     cJSON_AddItemToObject(resp, "error", err);
     cJSON_AddNumberToObject(err, "code", code);
     cJSON_AddStringToObject(err, "message", json_rpc_error_message(code));
-    if (rpc_id) {
-        cJSON_AddNumberToObject(resp, "id", *rpc_id);
+
+    if (id) {
+        cJSON_AddNumberToObject(resp, "id", *id);
     } else {
         cJSON_AddNullToObject(resp, "id");
     }
 
-    char *text = cJSON_PrintUnformatted(resp);
+    char *response = cJSON_PrintUnformatted(resp);
     cJSON_Delete(resp);
-    return text;
+    return response;
 }
 
 static char *json_rpc_error_message(int16_t code) {
