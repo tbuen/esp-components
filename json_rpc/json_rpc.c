@@ -34,13 +34,15 @@ static char *json_rpc_error_message(int16_t code);
 ***************************/
 
 static const json_rpc_config_t *config;
+static const json_rpc_error_config_t *error_config;
 
 /***************************
 ***** PUBLIC FUNCTIONS *****
 ***************************/
 
-void json_rpc_init(const json_rpc_config_t *cfg) {
+void json_rpc_init(const json_rpc_config_t *cfg, const json_rpc_error_config_t *err_cfg) {
     config = cfg;
+    error_config = err_cfg;
 }
 
 char *json_rpc_handle_request(const char *request) {
@@ -77,14 +79,19 @@ char *json_rpc_handle_request(const char *request) {
                     if (!(parameters = cfg->param_parser(params))) {
                         response = json_rpc_build_error_msg(JSON_RPC_INVALID_PARAMS, idptr);
                     }
-                } else if (!cfg->param_parser && !params) {
-                } else {
+                } else if (cfg->param_parser || params) {
                     response = json_rpc_build_error_msg(JSON_RPC_INVALID_PARAMS, idptr);
                 }
                 if (!response) {
                     void *result = NULL;
+                    cJSON *json_result = NULL;
                     cfg->handler(parameters, &result);
-                    response = json_rpc_build_response(cfg->result_builder(result), *idptr);
+                    uint8_t error = cfg->result_builder(result, &json_result);
+                    if (error) {
+                        response = json_rpc_build_error_msg(error, idptr);
+                    } else {
+                        response = json_rpc_build_response(json_result, *idptr);
+                    }
                 }
             } else {
                 response = json_rpc_build_error_msg(JSON_RPC_METHOD_NOT_FOUND, idptr);
@@ -154,6 +161,14 @@ static char *json_rpc_error_message(int16_t code) {
             ret = "internal error";
             break;
         default:
+            const json_rpc_error_config_t *err = error_config;
+            while (err && err->code) {
+                if (code == err->code) {
+                    ret = err->message;
+                    break;
+                }
+                err++;
+            }
             break;
     }
     return ret;
