@@ -39,3 +39,5 @@ void        con_delete(int sockfd);
 size_t      con_count(void);
 bool        con_get_con(int sockfd, con_id_t *con);
 bool        con_get_sock(con_id_t con, int *sockfd);
+void        con_ping(con_id_t con);
+bool        con_stale(int *sockfd);

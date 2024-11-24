@@ -10,6 +10,7 @@
 ***************************/
 
 #define MAX_CLIENT_CONNECTIONS  5
+#define CONNECTION_TIMEOUT      10
 
 /***************************
 ***** MACROS ***************
@@ -30,6 +31,7 @@ typedef struct {
     con_id_t con;
     con_mode_t mode;
     int sockfd;
+    int last_action;
 } connection_t;
 
 /***************************
@@ -68,6 +70,7 @@ void con_create(con_mode_t mode, int sockfd) {
                 connection[i].con = next_con++;
                 connection[i].mode = mode;
                 connection[i].sockfd = sockfd;
+                connection[i].last_action = pdTICKS_TO_MS(xTaskGetTickCount());
                 LOGI("create con %lu mode %d socket %d", connection[i].con, connection[i].mode, connection[i].sockfd);
                 msg_send_value(msg_type, CON_CONNECTED);
                 created = true;
@@ -134,6 +137,35 @@ bool con_get_sock(con_id_t con, int *sockfd) {
     if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         for (int i = 0; i < sizeof(connection)/sizeof(connection_t); ++i) {
             if (connection[i].con == con) {
+                *sockfd = connection[i].sockfd;
+                found = true;
+                break;
+            }
+        }
+        xSemaphoreGive(mutex);
+    }
+    return found;
+}
+
+void con_ping(con_id_t con) {
+    if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        for (int i = 0; i < sizeof(connection)/sizeof(connection_t); ++i) {
+            if (connection[i].con == con) {
+                connection[i].last_action = pdTICKS_TO_MS(xTaskGetTickCount());
+                break;
+            }
+        }
+        xSemaphoreGive(mutex);
+    }
+}
+
+bool con_stale(int *sockfd) {
+    bool found = false;
+    int stale_time = pdTICKS_TO_MS(xTaskGetTickCount()) - CONNECTION_TIMEOUT * 1000;
+    if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        for (int i = 0; i < sizeof(connection)/sizeof(connection_t); ++i) {
+            if (connection[i].con && connection[i].last_action < stale_time) {
+                LOGI("con %lu socket %d is stale", connection[i].con, connection[i].sockfd);
                 *sockfd = connection[i].sockfd;
                 found = true;
                 break;

@@ -3,7 +3,7 @@
 #include <mdns.h>
 #include <string.h>
 
-#include "message.h"
+#include "filesystem.h"
 #include "http_server.h"
 #include "wlan.h"
 
@@ -15,13 +15,16 @@
 #define TASK_PRIO     1
 #define STACK_SIZE 4096
 
-#define SCAN_MAX_AP  20
+#define SCAN_MAX_AP             20
+#define RECONNECT_TIMEOUT       30
 
-#define WLAN_INT_MODE_REQ       1
-#define WLAN_INT_AP_STARTED     2
-#define WLAN_INT_STA_STARTED    3
-#define WLAN_INT_CONNECTED      4
-#define WLAN_INT_DISCONNECTED   5
+#define WLAN_INT_MODE_REQ           1
+#define WLAN_INT_AP_CONNECTED       2
+#define WLAN_INT_AP_DISCONNECTED    3
+#define WLAN_INT_STA_STARTED        4
+#define WLAN_INT_CONNECTED          5
+#define WLAN_INT_DISCONNECTED       6
+#define WLAN_INT_REQ_RECONNECT      7
 
 /***************************
 ***** MACROS ***************
@@ -48,7 +51,9 @@ static void wlan_stop_sta(void);
 static void wlan_start_ap(void);
 static void wlan_stop_ap(void);
 static void wlan_scan(void);
+static void wlan_connect(void);
 static void wlan_task(void *param);
+static void wlan_timer_cb(TimerHandle_t timer);
 
 /***************************
 ***** LOCAL VARIABLES ******
@@ -103,7 +108,7 @@ void wlan_init(void) {
 
     ESP_ERROR_CHECK(mdns_init());
     ESP_ERROR_CHECK(mdns_hostname_set(CONFIG_WLAN_HOSTNAME));
-    ESP_ERROR_CHECK(mdns_service_add("audio", "_audio-jsonrpc-ws", "_tcp", 80, NULL, 0));
+    ESP_ERROR_CHECK(mdns_service_add(CONFIG_MDNS_INSTANCE_NAME, CONFIG_MDNS_SERVICE_TYPE, CONFIG_MDNS_PROTOCOL, CONFIG_MDNS_PORT, NULL, 0));
 
     if (xTaskCreatePinnedToCore(&wlan_task, "wlan-task", STACK_SIZE, NULL, TASK_PRIO, &handle, TASK_CORE) != pdPASS) {
         LOGE("could not create task");
@@ -142,14 +147,6 @@ void wlan_free_scan_result(void) {
 ***** LOCAL FUNCTIONS ******
 ***************************/
 
-/*void wlan_connect(const uint8_t *ssid, const uint8_t *password) {
-    wifi_msg_t *wifi_msg = calloc(1, sizeof(wifi_msg_t));
-    memcpy(wifi_msg->ssid, ssid, sizeof(wifi_msg->ssid));
-    memcpy(wifi_msg->password, password, sizeof(wifi_msg->password));
-    request_t request = { WLAN_REQ_CONNECT, wifi_msg };
-    xQueueSendToBack(request_queue, &request, 0);
-}*/
-
 static void wlan_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     if (event_base == WIFI_EVENT) {
         switch (event_id) {
@@ -168,7 +165,6 @@ static void wlan_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                 msg_send_value(msg_type, WLAN_DISCONNECTED);
                 break;
             case WIFI_EVENT_AP_START:
-                msg_send_value(msg_type_int, WLAN_INT_AP_STARTED);
                 msg_send_value(msg_type, WLAN_AP_STARTED);
                 break;
             case WIFI_EVENT_AP_STOP:
@@ -176,9 +172,11 @@ static void wlan_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                 break;
             case WIFI_EVENT_AP_STACONNECTED:
                 msg_send_value(msg_type, WLAN_AP_CONNECTED);
+                msg_send_value(msg_type_int, WLAN_INT_AP_CONNECTED);
                 break;
             case WIFI_EVENT_AP_STADISCONNECTED:
                 msg_send_value(msg_type, WLAN_AP_DISCONNECTED);
+                msg_send_value(msg_type_int, WLAN_INT_AP_DISCONNECTED);
                 break;
             default:
                 break;
@@ -257,33 +255,53 @@ static void wlan_scan(void) {
     msg_send_value(msg_type, WLAN_SCAN_STOPPED);
 }
 
-/*static void wlan_con(const uint8_t *ssid, const uint8_t *password) {
+static void wlan_connect(void) {
+    uint8_t cnt;
+    wlan_ap_t *ap;
+    bool connect = false;
     wifi_config_t wifi_config = {
         .sta = {
             .threshold.authmode = WIFI_AUTH_WPA2_PSK,
             .pmf_cfg = {
-                //.capable = true,
-                //.required = false
                 .required = true
             },
         },
     };
-    memcpy(&wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
-    memcpy(&wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_connect());
-}*/
+
+    if (wlan_get_scan_result(&cnt, &ap)) {
+        fs_wifi_cfg_t *cfg = fs_get_wifi_cfg();
+        for (int i = 0; i < cnt ; ++i) {
+            for (int j = 0; j < FS_NUMBER_OF_WIFI_NETWORKS; ++j) {
+                if (!memcmp(ap[i].ssid, cfg->network[j].ssid, 32)) {
+                    memcpy(&wifi_config.sta.ssid, cfg->network[j].ssid, sizeof(wifi_config.sta.ssid));
+                    memcpy(&wifi_config.sta.password, cfg->network[j].key, sizeof(wifi_config.sta.password));
+                    connect = true;
+                    break;
+                }
+            }
+        }
+        fs_free_wifi_cfg(false);
+        wlan_free_scan_result();
+    }
+
+    if (connect) {
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+        ESP_ERROR_CHECK(esp_wifi_connect());
+    }
+}
 
 static void wlan_task(void *param) {
+    TimerHandle_t timer = xTimerCreate("wifi-reconnect", pdMS_TO_TICKS(RECONNECT_TIMEOUT * 1000), false, NULL, wlan_timer_cb);
     wifi_mode_t mode;
     wlan_start_sta();
     for (;;) {
         msg_t msg = msg_receive(msg_handle);
         if (msg.type == msg_type_int) {
+            ESP_ERROR_CHECK(esp_wifi_get_mode(&mode));
             switch (msg.value) {
                 case WLAN_INT_MODE_REQ:
-                    ESP_ERROR_CHECK(esp_wifi_get_mode(&mode));
                     if (mode == WIFI_MODE_STA) {
+                        xTimerStop(timer, 0);
                         http_stop();
                         wlan_stop_sta();
                         wlan_start_ap();
@@ -294,30 +312,38 @@ static void wlan_task(void *param) {
                     }
                     break;
                 case WLAN_INT_STA_STARTED:
-                    wlan_scan();
+                    msg_send_value(msg_type_int, WLAN_INT_REQ_RECONNECT);
                     break;
-                case WLAN_INT_AP_STARTED:
+                case WLAN_INT_AP_CONNECTED:
                     http_start(CON_AP);
                     break;
+                case WLAN_INT_AP_DISCONNECTED:
+                    http_stop();
+                    break;
                 case WLAN_INT_CONNECTED:
+                    xTimerStop(timer, 0);
                     http_start(CON_STA);
                     break;
                 case WLAN_INT_DISCONNECTED:
                     http_stop();
+                    if (xTimerIsTimerActive(timer) == pdFALSE) {
+                        msg_send_value(msg_type_int, WLAN_INT_REQ_RECONNECT);
+                    }
+                    break;
+                case WLAN_INT_REQ_RECONNECT:
+                    if (mode == WIFI_MODE_STA) {
+                        xTimerStart(timer, 0);
+                        wlan_scan();
+                        wlan_connect();
+                    }
                     break;
                 default:
                     break;
             }
         }
-#if 0
-                case WLAN_REQ_CONNECT:
-                    if (   (mode == WIFI_MODE_STA)
-                        && request.data) {
-                        wifi_msg_t *wifi_msg = (wifi_msg_t*)request.data;
-                        wlan_con(wifi_msg->ssid, wifi_msg->password);
-                        free(request.data);
-                    }
-                    break;
-#endif
     }
+}
+
+static void wlan_timer_cb(TimerHandle_t timer) {
+    msg_send_value(msg_type_int, WLAN_INT_REQ_RECONNECT);
 }

@@ -18,4 +18,28 @@ menu "WLAN"
         help
             WLAN KEY
 
+    config MDNS_INSTANCE_NAME
+        string "mDNS instance name"
+        default "esp32"
+        help
+            mDNS instance name
+
+    config MDNS_SERVICE_TYPE
+        string "mDNS service type"
+        default "_esp32"
+        help
+            mDNS service type
+
+    config MDNS_PROTOCOL
+        string "mDNS protocol"
+        default "_tcp"
+        help
+            mDNS protocol
+
+    config MDNS_PORT
+        int "mDNS port"
+        default 80
+        help
+            mDNS port
+
 endmenu

@@ -88,7 +88,6 @@ void http_start(con_mode_t mode) {
 }
 
 void http_stop(void) {
-    assert(msg_type_ws_recv);
     if (!server) return;
 
     size_t fds = MAX_CLIENT_CONNECTIONS;
@@ -113,6 +112,29 @@ void http_stop(void) {
     server = NULL;
 
     LOGI("stopped");
+}
+
+void http_close(int sockfd) {
+    if (!server) return;
+
+    size_t fds = MAX_CLIENT_CONNECTIONS;
+    int client_fds[MAX_CLIENT_CONNECTIONS];
+    ESP_ERROR_CHECK(httpd_get_client_list(server, &fds, client_fds));
+
+    for (size_t i = 0; i < fds; ++i) {
+        if (httpd_ws_get_fd_info(server, client_fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
+            httpd_ws_frame_t ws_pkt = {
+                .final = true,
+                .fragmented = false,
+                .type = HTTPD_WS_TYPE_CLOSE,
+                .payload = NULL,
+                .len = 0
+            };
+            httpd_ws_send_data(server, client_fds[i], &ws_pkt);
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        httpd_sess_trigger_close(server, client_fds[i]);
+    }
 }
 
 void http_send_ws_msg(con_id_t con, const char *text) {
@@ -161,6 +183,7 @@ static esp_err_t websocket_handler(httpd_req_t *req) {
         return ret;
     }
     LOGD("packet type: %d len: %d", ws_pkt.type, ws_pkt.len);
+    // TODO handle ping
     if (ws_pkt.type == HTTPD_WS_TYPE_TEXT) {
         if (ws_pkt.len) {
             buf = calloc(1, ws_pkt.len + 1);
@@ -178,6 +201,7 @@ static esp_err_t websocket_handler(httpd_req_t *req) {
 
             con_id_t con;
             if (con_get_con(httpd_req_to_sockfd(req), &con)) {
+                con_ping(con);
                 ws_msg_t *ws_msg = calloc(1, sizeof(ws_msg_t));
                 ws_msg->con = con;
                 ws_msg->text = (char*)buf;
