@@ -2,6 +2,8 @@
 #include <esp_log.h>
 #include <unistd.h>
 
+#include "filesystem.h"
+#include "http_parser.h"
 #include "http_server.h"
 
 /***************************
@@ -9,6 +11,9 @@
 ***************************/
 
 #define MAX_CLIENT_CONNECTIONS  5
+
+#define HTTPD_201               "201 Created"
+#define WEB_FILE_DEFAULT        "/index.html"
 
 /***************************
 ***** MACROS ***************
@@ -30,6 +35,10 @@
 ***************************/
 
 static void close_fn(httpd_handle_t hd, int sockfd);
+static void web_con(httpd_req_t *req);
+static esp_err_t file_get_handler(httpd_req_t *req);
+static esp_err_t file_put_handler(httpd_req_t *req);
+static esp_err_t file_delete_handler(httpd_req_t *req);
 static esp_err_t websocket_handler(httpd_req_t *req);
 static void free_ws_msg(void *ptr);
 
@@ -39,6 +48,27 @@ static void free_ws_msg(void *ptr);
 
 static httpd_handle_t       server;
 static msg_type_t           msg_type_ws_recv;
+
+static const httpd_uri_t    file_get = {
+    .uri = "/*",
+    .method = HTTP_GET,
+    .handler = &file_get_handler,
+    .user_ctx = NULL,
+};
+
+static const httpd_uri_t    file_put = {
+    .uri = "/*",
+    .method = HTTP_PUT,
+    .handler = &file_put_handler,
+    .user_ctx = NULL,
+};
+
+static const httpd_uri_t    file_delete = {
+    .uri = "/*",
+    .method = HTTP_DELETE,
+    .handler = &file_delete_handler,
+    .user_ctx = NULL,
+};
 
 static const httpd_uri_t    websocket = {
     .uri = "/websocket",
@@ -75,9 +105,13 @@ void http_start(con_mode_t mode) {
     config.max_open_sockets = MAX_CLIENT_CONNECTIONS;
     config.close_fn = &close_fn;
     config.global_user_ctx = mode_ptr;
+    config.uri_match_fn = &httpd_uri_match_wildcard;
 
     if (httpd_start(&server, &config) == ESP_OK) {
         httpd_register_uri_handler(server, &websocket);
+        httpd_register_uri_handler(server, &file_get);
+        httpd_register_uri_handler(server, &file_put);
+        httpd_register_uri_handler(server, &file_delete);
     }
 
     if (server) {
@@ -164,6 +198,67 @@ static void close_fn(httpd_handle_t hd, int sockfd) {
     LOGI("close socket %d", sockfd);
     close(sockfd);
     con_delete(sockfd);
+}
+
+static void web_con(httpd_req_t *req) {
+    int sockfd = httpd_req_to_sockfd(req);
+    con_id_t con;
+    if (con_get_con(sockfd, &con)) {
+        con_ping(con);
+    } else {
+        con_mode_t mode = *(con_mode_t*)httpd_get_global_user_ctx(req->handle);
+        con_create(mode, sockfd);
+    }
+}
+
+static esp_err_t file_get_handler(httpd_req_t *req) {
+    web_con(req);
+    LOGI("GET %s", req->uri);
+    const char *uri = req->uri;
+    if (!strcmp(uri, "/")) {
+        uri = WEB_FILE_DEFAULT;
+    }
+    int fd = fs_web_open(uri, FS_WEB_READ);
+    if (fd < 0) {
+        httpd_resp_set_status(req, HTTPD_404);
+        httpd_resp_send(req, NULL, 0);
+    } else {
+        fs_web_close(fd);
+        httpd_resp_send(req, "dummy text:-)", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t file_put_handler(httpd_req_t *req) {
+    web_con(req);
+    LOGI("PUT %s", req->uri);
+    bool exist = fs_web_exist(req->uri);
+    int fd = fs_web_open(req->uri, FS_WEB_WRITE);
+    if (fd < 0) {
+        httpd_resp_set_status(req, HTTPD_404);
+    } else {
+        fs_web_close(fd);
+        if (exist) {
+            httpd_resp_set_status(req, HTTPD_204);
+        } else {
+            httpd_resp_set_status(req, HTTPD_201);
+        }
+    }
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+static esp_err_t file_delete_handler(httpd_req_t *req) {
+    web_con(req);
+    LOGI("DELETE %s", req->uri);
+    if (fs_web_exist(req->uri)) {
+        fs_web_delete(req->uri);
+        httpd_resp_set_status(req, HTTPD_204);
+    } else {
+        httpd_resp_set_status(req, HTTPD_404);
+    }
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
 }
 
 static esp_err_t websocket_handler(httpd_req_t *req) {
