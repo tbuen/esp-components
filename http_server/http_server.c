@@ -13,7 +13,9 @@
 #define MAX_CLIENT_CONNECTIONS  5
 
 #define HTTPD_201               "201 Created"
+#define HTTPD_507               "507 Insufficient Storage"
 #define WEB_FILE_DEFAULT        "/index.html"
+#define WEB_BUFFER_SIZE         4096
 
 /***************************
 ***** MACROS ***************
@@ -78,6 +80,8 @@ static const httpd_uri_t    websocket = {
     .is_websocket = true,
     .handle_ws_control_frames = false
 };
+
+static char web_buffer[WEB_BUFFER_SIZE];
 
 /***************************
 ***** PUBLIC FUNCTIONS *****
@@ -223,8 +227,15 @@ static esp_err_t file_get_handler(httpd_req_t *req) {
         httpd_resp_set_status(req, HTTPD_404);
         httpd_resp_send(req, NULL, 0);
     } else {
+        int16_t read;
+        do {
+            read = fs_web_read(fd, web_buffer, WEB_BUFFER_SIZE);
+            if (read > 0) {
+                httpd_resp_send_chunk(req, web_buffer, read);
+            }
+        } while (read == WEB_BUFFER_SIZE);
+        httpd_resp_send_chunk(req, NULL, 0);
         fs_web_close(fd);
-        httpd_resp_send(req, "dummy text:-)", HTTPD_RESP_USE_STRLEN);
     }
     return ESP_OK;
 }
@@ -233,12 +244,32 @@ static esp_err_t file_put_handler(httpd_req_t *req) {
     web_con(req);
     LOGI("PUT %s", req->uri);
     bool exist = fs_web_exist(req->uri);
+    bool error = false;
     int fd = fs_web_open(req->uri, FS_WEB_WRITE);
     if (fd < 0) {
         httpd_resp_set_status(req, HTTPD_404);
     } else {
+        size_t len = req->content_len;
+        while ((len > 0) && !error) {
+            int16_t chunk = WEB_BUFFER_SIZE;
+            if (len < chunk) {
+                chunk = len;
+            }
+            if (httpd_req_recv(req, web_buffer, chunk) == chunk) {
+                if (fs_web_write(fd, web_buffer, chunk) != chunk) {
+                    httpd_resp_set_status(req, HTTPD_507);
+                    error = true;
+                }
+            } else {
+                httpd_resp_set_status(req, HTTPD_500);
+                error = true;
+            }
+            len -= chunk;
+        }
         fs_web_close(fd);
-        if (exist) {
+        if (error) {
+            fs_web_delete(req->uri);
+        } else if (exist) {
             httpd_resp_set_status(req, HTTPD_204);
         } else {
             httpd_resp_set_status(req, HTTPD_201);

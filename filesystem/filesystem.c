@@ -75,7 +75,7 @@ void fs_init(void) {
             struct dirent *entry= readdir(dir);
             while (entry) {
                 if (entry->d_type == DT_REG) {
-                    LOGI("WEB file: %s", entry->d_name);
+                    LOGI("file: %s", entry->d_name);
                 }
                 entry = readdir(dir);
             }
@@ -85,6 +85,10 @@ void fs_init(void) {
         LOGW("creating %s", WEB_DIR);
         mkdir(WEB_DIR, 0);
     }
+    uint64_t total, free, used;
+    ESP_ERROR_CHECK(esp_vfs_fat_info(MOUNTPOINT, &total, &free));
+    used = total - free;
+    LOGI("used: %d/%dKiB (%d%%)", (uint16_t)(used / 1024), (uint16_t)(total / 1024), (uint16_t)(used * 100 / total));
 }
 
 fs_wifi_cfg_t *fs_get_wifi_cfg(void) {
@@ -131,6 +135,36 @@ int fs_web_open(const char *filename, fs_mode_t mode) {
                 }
                 break;
             }
+        }
+    }
+    return ret;
+}
+
+int16_t fs_web_read(int fd, char *data, int16_t len) {
+    int16_t ret = 0;
+    if (len > 0) {
+        if (   (fd >= 0)
+            && (fd < MAX_FILES_OPEN)
+            && (fd_table[fd]))
+        {
+            ret = fread(data, 1, len, fd_table[fd]);
+        } else {
+           ret = -1;
+        }
+    }
+    return ret;
+}
+
+int16_t fs_web_write(int fd, const char *data, int16_t len) {
+    int16_t ret = 0;
+    if (len > 0) {
+        if (   (fd >= 0)
+            && (fd < MAX_FILES_OPEN)
+            && (fd_table[fd]))
+        {
+            ret = fwrite(data, 1, len, fd_table[fd]);
+        } else {
+           ret = -1;
         }
     }
     return ret;

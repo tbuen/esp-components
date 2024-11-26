@@ -40,5 +40,7 @@ fs_wifi_cfg_t  *fs_get_wifi_cfg(void);
 void            fs_free_wifi_cfg(bool save);
 bool            fs_web_exist(const char *filename);
 int             fs_web_open(const char *filename, fs_mode_t mode);
+int16_t         fs_web_read(int fd, char *data, int16_t len);
+int16_t         fs_web_write(int fd, const char *data, int16_t len);
 void            fs_web_close(int fd);
 void            fs_web_delete(const char *filename);
