@@ -3,7 +3,6 @@
 #include <unistd.h>
 
 #include "filesystem.h"
-#include "http_parser.h"
 #include "http_server.h"
 
 /***************************
@@ -222,11 +221,13 @@ static esp_err_t file_get_handler(httpd_req_t *req) {
     if (!strcmp(uri, "/")) {
         uri = WEB_FILE_DEFAULT;
     }
-    int fd = fs_web_open(uri, FS_WEB_READ);
+    char *content_type;
+    int fd = fs_web_open(uri, FS_WEB_READ, &content_type);
     if (fd < 0) {
         httpd_resp_set_status(req, HTTPD_404);
         httpd_resp_send(req, NULL, 0);
     } else {
+        httpd_resp_set_type(req, content_type);
         int16_t read;
         do {
             read = fs_web_read(fd, web_buffer, WEB_BUFFER_SIZE);
@@ -245,7 +246,7 @@ static esp_err_t file_put_handler(httpd_req_t *req) {
     LOGI("PUT %s", req->uri);
     bool exist = fs_web_exist(req->uri);
     bool error = false;
-    int fd = fs_web_open(req->uri, FS_WEB_WRITE);
+    int fd = fs_web_open(req->uri, FS_WEB_WRITE, NULL);
     if (fd < 0) {
         httpd_resp_set_status(req, HTTPD_404);
     } else {

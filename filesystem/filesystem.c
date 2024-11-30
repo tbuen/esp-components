@@ -17,7 +17,6 @@
 #define WIFI_CFG_FILE           "/spiflash/wificfg.bin"
 #define WEB_DIR                 "/spiflash/web"
 #define MAX_FILES_OPEN          5
-#define MAX_FILENAME_LEN        33
 
 /***************************
 ***** MACROS ***************
@@ -34,11 +33,17 @@
 ***** TYPES ****************
 ***************************/
 
+typedef struct {
+    char *extension;
+    char *content_type;
+} content_type_mapping_t;
+
 /***************************
 ***** LOCAL FUNCTIONS ******
 ***************************/
 
 static bool fs_check_filename(const char *filename);
+static char *fs_get_content_type(const char *filename);
 
 /***************************
 ***** LOCAL VARIABLES ******
@@ -47,6 +52,12 @@ static bool fs_check_filename(const char *filename);
 static SemaphoreHandle_t mutex;
 static fs_wifi_cfg_t wifi_cfg;
 static FILE *fd_table[MAX_FILES_OPEN];
+static content_type_mapping_t content_type_mapping[] = {
+    { ".html", "text/html"              },
+    { ".css" , "text/css"               },
+    { ".js"  , "application/javascript" },
+    { ".png" , "image/png"              },
+};
 
 /***************************
 ***** PUBLIC FUNCTIONS *****
@@ -69,26 +80,10 @@ void fs_init(void) {
         LOGW("could not open %s", WIFI_CFG_FILE);
     }
     struct stat st;
-    if (stat(WEB_DIR, &st) == 0) {
-        DIR *dir = opendir(WEB_DIR);
-        if (dir) {
-            struct dirent *entry= readdir(dir);
-            while (entry) {
-                if (entry->d_type == DT_REG) {
-                    LOGI("file: %s", entry->d_name);
-                }
-                entry = readdir(dir);
-            }
-            closedir(dir);
-        }
-    } else {
+    if (stat(WEB_DIR, &st)) {
         LOGW("creating %s", WEB_DIR);
         mkdir(WEB_DIR, 0);
     }
-    uint64_t total, free, used;
-    ESP_ERROR_CHECK(esp_vfs_fat_info(MOUNTPOINT, &total, &free));
-    used = total - free;
-    LOGI("used: %d/%dKiB (%d%%)", (uint16_t)(used / 1024), (uint16_t)(total / 1024), (uint16_t)(used * 100 / total));
 }
 
 fs_wifi_cfg_t *fs_get_wifi_cfg(void) {
@@ -109,11 +104,35 @@ void fs_free_wifi_cfg(bool save) {
     xSemaphoreGive(mutex);
 }
 
+void fs_web_info(fs_web_info_t *info) {
+    memset(info, 0, sizeof(fs_web_info_t));
+    DIR *dir = opendir(WEB_DIR);
+    if (dir) {
+        char full_name[sizeof(WEB_DIR) + 1 + FS_MAX_FILENAME_LEN];
+        struct stat st;
+        struct dirent *entry= readdir(dir);
+        while (entry && (info->num_files < FS_NUMBER_OF_WEB_FILES)) {
+            if (entry->d_type == DT_REG) {
+                strncpy(info->files[info->num_files].name, entry->d_name, FS_MAX_FILENAME_LEN);
+                info->files[info->num_files].content_type = fs_get_content_type(entry->d_name);
+                sprintf(full_name, "%s/%.*s", WEB_DIR, FS_MAX_FILENAME_LEN, entry->d_name);
+                if (!stat(full_name, &st)) {
+                    info->files[info->num_files].size = st.st_size;
+                }
+                info->num_files++;
+            }
+            entry = readdir(dir);
+        }
+        closedir(dir);
+    }
+    ESP_ERROR_CHECK(esp_vfs_fat_info(MOUNTPOINT, &info->total, &info->free));
+}
+
 bool fs_web_exist(const char *filename) {
     bool ret = false;
     if (fs_check_filename(filename)) {
         struct stat st;
-        char full_name[sizeof(WEB_DIR) + MAX_FILENAME_LEN];
+        char full_name[sizeof(WEB_DIR) + 1 + FS_MAX_FILENAME_LEN];
         sprintf(full_name, "%s%s", WEB_DIR, filename);
         if (!stat(full_name, &st)) {
             ret = true;
@@ -122,12 +141,15 @@ bool fs_web_exist(const char *filename) {
     return ret;
 }
 
-int fs_web_open(const char *filename, fs_mode_t mode) {
+int fs_web_open(const char *filename, fs_mode_t mode, char **content_type) {
     int ret = -1;
     if (fs_check_filename(filename)) {
+        if (content_type) {
+            *content_type = fs_get_content_type(filename);
+        }
         for (int i = 0; i < MAX_FILES_OPEN; ++i) {
             if (!fd_table[i]) {
-                char full_name[sizeof(WEB_DIR) + MAX_FILENAME_LEN];
+                char full_name[sizeof(WEB_DIR) + 1 + FS_MAX_FILENAME_LEN];
                 sprintf(full_name, "%s%s", WEB_DIR, filename);
                 fd_table[i] = fopen(full_name, mode == FS_WEB_WRITE ? "w" : "r");
                 if (fd_table[i]) {
@@ -182,7 +204,7 @@ void fs_web_close(int fd) {
 
 void fs_web_delete(const char *filename) {
     if (fs_check_filename(filename)) {
-        char full_name[sizeof(WEB_DIR) + MAX_FILENAME_LEN];
+        char full_name[sizeof(WEB_DIR) + 1 + FS_MAX_FILENAME_LEN];
         sprintf(full_name, "%s%s", WEB_DIR, filename);
         remove(full_name);
     }
@@ -194,7 +216,7 @@ void fs_web_delete(const char *filename) {
 
 static bool fs_check_filename(const char *filename) {
     bool ret = false;
-    if (filename && (filename[0] == '/') && filename[1] && (strlen(filename) <= MAX_FILENAME_LEN)) {
+    if (filename && (filename[0] == '/') && filename[1] && (strlen(&filename[1]) <= FS_MAX_FILENAME_LEN)) {
         ret = true;
         const char *x = &filename[1];
         while (*x) {
@@ -212,4 +234,18 @@ static bool fs_check_filename(const char *filename) {
         }
     }
     return ret;
+}
+
+static char *fs_get_content_type(const char *filename) {
+   char *content_type = "";
+   char *ext = strrchr(filename, '.');
+   if (ext) {
+       for (int i = 0; i < sizeof(content_type_mapping)/sizeof(content_type_mapping[0]); ++i) {
+           if (!strcmp(ext, content_type_mapping[i].extension)) {
+               content_type = content_type_mapping[i].content_type;
+               break;
+           }
+       }
+   }
+   return content_type;
 }
