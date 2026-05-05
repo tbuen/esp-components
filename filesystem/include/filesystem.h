@@ -32,6 +32,7 @@ typedef struct fs_web_file {
     char name[FS_MAX_FILENAME_LEN + 1];
     char *content_type;
     uint32_t size;
+    uint8_t md5[16];
 } fs_web_file_t;
 
 typedef struct {

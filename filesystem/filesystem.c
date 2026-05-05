@@ -1,9 +1,11 @@
+#include <dirent.h>
 #include <esp_log.h>
 #include <esp_vfs_fat.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <mbedtls/esp_config.h>
+#include <mbedtls/md.h>
 #include <string.h>
-#include <sys/dirent.h>
 #include <sys/stat.h>
 
 #include "filesystem.h"
@@ -119,6 +121,7 @@ void fs_web_info(fs_web_info_t *info) {
                 if (!stat(full_name, &st)) {
                     info->files[info->num_files].size = st.st_size;
                 }
+                ESP_ERROR_CHECK(mbedtls_md_file(mbedtls_md_info_from_type(MBEDTLS_MD_MD5), full_name, info->files[info->num_files].md5));
                 info->num_files++;
             }
             entry = readdir(dir);
