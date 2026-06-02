@@ -22,8 +22,8 @@
 ********************/
 
 typedef enum {
-    CON_AP,
-    CON_STA
+    CON_AP  = 1,
+    CON_STA = 2,
 } con_mode_t;
 
 typedef uint32_t con_id_t;
@@ -39,5 +39,6 @@ void        con_delete(int sockfd);
 size_t      con_count(void);
 bool        con_get_con(int sockfd, con_id_t *con);
 bool        con_get_sock(con_id_t con, int *sockfd);
+bool        con_get_mode(con_id_t con, con_mode_t *mode);
 void        con_ping(con_id_t con);
 bool        con_stale(int *sockfd);

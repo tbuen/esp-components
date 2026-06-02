@@ -16,7 +16,7 @@
 
 #define FILESYSTEM_LABEL        "filesystem"
 #define MOUNTPOINT              "/spiflash"
-#define WIFI_CFG_FILE           "/spiflash/wificfg.bin"
+#define WIFI_CFG_FILE           "/spiflash/wificfg.json"
 #define WEB_DIR                 "/spiflash/web"
 #define MAX_FILES_OPEN          5
 
@@ -52,7 +52,7 @@ static char *fs_get_content_type(const char *filename);
 ***************************/
 
 static SemaphoreHandle_t mutex;
-static fs_wifi_cfg_t wifi_cfg;
+static cJSON *wifi_cfg;
 static FILE *fd_table[MAX_FILES_OPEN];
 static content_type_mapping_t content_type_mapping[] = {
     { ".html", "text/html"              },
@@ -74,33 +74,48 @@ void fs_init(void) {
     };
     wl_handle_t wl_handle;
     ESP_ERROR_CHECK(esp_vfs_fat_spiflash_mount_rw_wl(MOUNTPOINT, FILESYSTEM_LABEL, &fat_config, &wl_handle));
-    FILE *f = fopen(WIFI_CFG_FILE, "r");
-    if (f) {
-        fread(&wifi_cfg, sizeof(fs_wifi_cfg_t), 1, f);
-        fclose(f);
-    } else {
-        LOGW("could not open %s", WIFI_CFG_FILE);
-    }
     struct stat st;
+    if (stat(WIFI_CFG_FILE, &st)) {
+        wifi_cfg = cJSON_CreateObject();
+    } else {
+        FILE *f = fopen(WIFI_CFG_FILE, "r");
+        if (f) {
+            char *buf = malloc(st.st_size);
+            fread(buf, st.st_size, 1, f);
+            wifi_cfg = cJSON_ParseWithLength(buf, st.st_size);
+            if (!cJSON_IsObject(wifi_cfg)) {
+                LOGE("could not parse %s", WIFI_CFG_FILE);
+                wifi_cfg = cJSON_CreateObject();
+            }
+            free(buf);
+            fclose(f);
+        } else {
+            LOGE("could not open %s", WIFI_CFG_FILE);
+            wifi_cfg = cJSON_CreateObject();
+        }
+    }
     if (stat(WEB_DIR, &st)) {
-        LOGW("creating %s", WEB_DIR);
+        LOGI("creating %s", WEB_DIR);
         mkdir(WEB_DIR, 0);
     }
 }
 
-fs_wifi_cfg_t *fs_get_wifi_cfg(void) {
+cJSON *fs_get_wifi_cfg(void) {
     xSemaphoreTake(mutex, portMAX_DELAY);
-    return &wifi_cfg;
+    return wifi_cfg;
 }
 
 void fs_free_wifi_cfg(bool save) {
     if (save) {
         FILE *f = fopen(WIFI_CFG_FILE, "w");
         if (f) {
-            fwrite(&wifi_cfg, sizeof(fs_wifi_cfg_t), 1, f);
+            char *buf = cJSON_PrintUnformatted(wifi_cfg);
+            LOGD("write WiFi config: %s", buf);
+            fwrite(buf, strlen(buf), 1, f);
+            free(buf);
             fclose(f);
         } else {
-            LOGW("could not open %s", WIFI_CFG_FILE);
+            LOGE("could not open %s", WIFI_CFG_FILE);
         }
     }
     xSemaphoreGive(mutex);

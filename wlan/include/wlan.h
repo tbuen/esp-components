@@ -27,8 +27,8 @@
 ********************/
 
 typedef struct {
-    uint8_t ssid[33];
-    int8_t  rssi;
+    char   ssid[33];
+    int8_t rssi;
 } wlan_ap_t;
 
 /********************

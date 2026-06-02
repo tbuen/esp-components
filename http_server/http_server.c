@@ -40,7 +40,8 @@ static void web_con(httpd_req_t *req);
 static esp_err_t file_get_handler(httpd_req_t *req);
 static esp_err_t file_put_handler(httpd_req_t *req);
 static esp_err_t file_delete_handler(httpd_req_t *req);
-static esp_err_t websocket_handler(httpd_req_t *req);
+static esp_err_t websocket_connect_handler(httpd_req_t *req);
+static esp_err_t websocket_data_handler(httpd_req_t *req);
 static void free_ws_msg(void *ptr);
 
 /***************************
@@ -74,10 +75,11 @@ static const httpd_uri_t    file_delete = {
 static const httpd_uri_t    websocket = {
     .uri = "/websocket",
     .method = HTTP_GET,
-    .handler = &websocket_handler,
+    .handler = &websocket_data_handler,
     .user_ctx = NULL,
     .is_websocket = true,
-    .handle_ws_control_frames = false
+    .handle_ws_control_frames = true,
+    .ws_post_handshake_cb = &websocket_connect_handler,
 };
 
 static char web_buffer[WEB_BUFFER_SIZE];
@@ -293,13 +295,13 @@ static esp_err_t file_delete_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-static esp_err_t websocket_handler(httpd_req_t *req) {
-    if (req->method == HTTP_GET) {
-        con_mode_t mode = *(con_mode_t*)httpd_get_global_user_ctx(req->handle);
-        con_create(mode, httpd_req_to_sockfd(req));
-        return ESP_OK;
-    }
+static esp_err_t websocket_connect_handler(httpd_req_t *req) {
+    con_mode_t mode = *(con_mode_t*)httpd_get_global_user_ctx(req->handle);
+    con_create(mode, httpd_req_to_sockfd(req));
+    return ESP_OK;
+}
 
+static esp_err_t websocket_data_handler(httpd_req_t *req) {
     httpd_ws_frame_t ws_pkt;
     uint8_t *buf = NULL;
     memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
@@ -309,9 +311,9 @@ static esp_err_t websocket_handler(httpd_req_t *req) {
         LOGE("httpd_ws_recv_frame failed to get frame len with %d", ret);
         return ret;
     }
-    LOGD("packet type: %d len: %d", ws_pkt.type, ws_pkt.len);
-    // TODO handle ping
+
     if (ws_pkt.type == HTTPD_WS_TYPE_TEXT) {
+        LOGI("received TEXT with len: %d", ws_pkt.len);
         if (ws_pkt.len) {
             buf = calloc(1, ws_pkt.len + 1);
             if (buf == NULL) {
@@ -335,6 +337,27 @@ static esp_err_t websocket_handler(httpd_req_t *req) {
                 msg_send_ptr(msg_type_ws_recv, ws_msg, &free_ws_msg);
             }
         }
+    } else if (ws_pkt.type == HTTPD_WS_TYPE_PING) {
+        httpd_ws_frame_t ws_pkt = {
+            .final = true,
+            .fragmented = false,
+            .type = HTTPD_WS_TYPE_PONG,
+        };
+        httpd_ws_send_frame(req, &ws_pkt);
+
+        con_id_t con;
+        if (con_get_con(httpd_req_to_sockfd(req), &con)) {
+            con_ping(con);
+        }
+    } else if (ws_pkt.type == HTTPD_WS_TYPE_CLOSE) {
+        httpd_ws_frame_t ws_pkt = {
+            .final = true,
+            .fragmented = false,
+            .type = HTTPD_WS_TYPE_CLOSE,
+        };
+        httpd_ws_send_frame(req, &ws_pkt);
+    } else {
+        LOGW("received unhandled ws type: %d", ws_pkt.type);
     }
     return ret;
 }

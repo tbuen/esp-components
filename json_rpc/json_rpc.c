@@ -46,7 +46,7 @@ void json_rpc_init(const json_rpc_config_t *cfg, const json_rpc_error_config_t *
     error_config = err_cfg;
 }
 
-char *json_rpc_handle_request(const char *request) {
+char *json_rpc_handle_request(void *ctx, const char *request) {
     assert(config);
 
     int *idptr = NULL;
@@ -86,7 +86,7 @@ char *json_rpc_handle_request(const char *request) {
                 if (!response) {
                     void *result = NULL;
                     cJSON *json_result = NULL;
-                    cfg->handler(parameters, &result);
+                    cfg->handler(ctx, parameters, &result);
                     uint8_t error = cfg->result_builder(result, &json_result);
                     if (error) {
                         response = json_rpc_build_error_msg(error, idptr);

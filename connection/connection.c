@@ -113,7 +113,7 @@ size_t con_count(void) {
         }
         xSemaphoreGive(mutex);
     }
-    LOGI("count %d", count);
+    LOGD("count %d", count);
     return count;
 }
 
@@ -138,6 +138,21 @@ bool con_get_sock(con_id_t con, int *sockfd) {
         for (int i = 0; i < sizeof(connection)/sizeof(connection_t); ++i) {
             if (connection[i].con == con) {
                 *sockfd = connection[i].sockfd;
+                found = true;
+                break;
+            }
+        }
+        xSemaphoreGive(mutex);
+    }
+    return found;
+}
+
+bool con_get_mode(con_id_t con, con_mode_t *mode) {
+    bool found = false;
+    if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        for (int i = 0; i < sizeof(connection)/sizeof(connection_t); ++i) {
+            if (connection[i].con == con) {
+                *mode = connection[i].mode;
                 found = true;
                 break;
             }

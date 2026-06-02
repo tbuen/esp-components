@@ -1,3 +1,4 @@
+#include <cJSON.h>
 #include <esp_log.h>
 #include <esp_wifi.h>
 #include <mdns.h>
@@ -269,16 +270,23 @@ static void wlan_connect(void) {
     };
 
     if (wlan_get_scan_result(&cnt, &ap)) {
-        fs_wifi_cfg_t *cfg = fs_get_wifi_cfg();
-        for (int i = 0; i < cnt ; ++i) {
-            for (int j = 0; j < FS_NUMBER_OF_WIFI_NETWORKS; ++j) {
-                if (!memcmp(ap[i].ssid, cfg->network[j].ssid, 32)) {
-                    memcpy(&wifi_config.sta.ssid, cfg->network[j].ssid, sizeof(wifi_config.sta.ssid));
-                    memcpy(&wifi_config.sta.password, cfg->network[j].key, sizeof(wifi_config.sta.password));
-                    connect = true;
-                    break;
+        cJSON *cfg = fs_get_wifi_cfg();
+        cJSON *networks = cJSON_GetObjectItemCaseSensitive(cfg, "networks");
+        cJSON *network;
+        cJSON_ArrayForEach(network, networks) {
+            cJSON *ssid = cJSON_GetObjectItemCaseSensitive(network, "ssid");
+            cJSON *key = cJSON_GetObjectItemCaseSensitive(network, "key");
+            if (cJSON_IsString(ssid) && cJSON_IsString(key)) {
+                for (int i = 0; i < cnt; ++i) {
+                    if (!strcmp(ap[i].ssid, ssid->valuestring)) {
+                        strncpy((char*)wifi_config.sta.ssid, ssid->valuestring, sizeof(wifi_config.sta.ssid));
+                        strncpy((char*)wifi_config.sta.password, key->valuestring, sizeof(wifi_config.sta.password));
+                        connect = true;
+                        break;
+                    }
                 }
             }
+            if (connect) break;
         }
         fs_free_wifi_cfg(false);
         wlan_free_scan_result();
