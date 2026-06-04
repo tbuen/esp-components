@@ -14,7 +14,7 @@
 ***** CONSTANTS ************
 ***************************/
 
-#define FILESYSTEM_LABEL        "filesystem"
+#define FILESYSTEM_LABEL        "storage"
 #define MOUNTPOINT              "/spiflash"
 #define WIFI_CFG_FILE           "/spiflash/wificfg.json"
 #define WEB_DIR                 "/spiflash/web"

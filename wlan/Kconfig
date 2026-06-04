@@ -12,12 +12,6 @@ menu "WLAN"
         help
             WLAN SSID
 
-    config WLAN_KEY
-        string "KEY"
-        default "esp32"
-        help
-            WLAN KEY
-
     config MDNS_INSTANCE_NAME
         string "mDNS instance name"
         default "esp32"
@@ -26,7 +20,7 @@ menu "WLAN"
 
     config MDNS_SERVICE_TYPE
         string "mDNS service type"
-        default "_esp32"
+        default "_jsonrpc-websocket"
         help
             mDNS service type
 

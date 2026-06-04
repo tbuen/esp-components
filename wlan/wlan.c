@@ -49,7 +49,7 @@
 static void wlan_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
 static void wlan_start_sta(void);
 static void wlan_stop_sta(void);
-static void wlan_start_ap(void);
+static void wlan_start_ap(char *key);
 static void wlan_stop_ap(void);
 static void wlan_scan(void);
 static void wlan_connect(void);
@@ -212,17 +212,16 @@ static void wlan_stop_sta(void) {
     ESP_ERROR_CHECK(esp_wifi_stop());
 }
 
-static void wlan_start_ap(void) {
+static void wlan_start_ap(char *key) {
     wifi_config_t wifi_config = {
         .ap = {
             .ssid = CONFIG_WLAN_SSID,
             .channel = 6,
-            .password = CONFIG_WLAN_KEY,
             .max_connection = 1,
             .authmode = WIFI_AUTH_WPA2_PSK
         },
     };
-
+    strncpy((char*)wifi_config.ap.password, key, sizeof(wifi_config.ap.password));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
@@ -309,10 +308,18 @@ static void wlan_task(void *param) {
             switch (msg.value) {
                 case WLAN_INT_MODE_REQ:
                     if (mode == WIFI_MODE_STA) {
-                        xTimerStop(timer, 0);
-                        http_stop();
-                        wlan_stop_sta();
-                        wlan_start_ap();
+                        cJSON *cfg = fs_get_wifi_cfg();
+                        cJSON *ap = cJSON_GetObjectItemCaseSensitive(cfg, "ap");
+                        cJSON *key = cJSON_GetObjectItemCaseSensitive(ap, "key");
+                        if (cJSON_IsString(key) && (strlen(key->valuestring) > 0)) {
+                            xTimerStop(timer, 0);
+                            http_stop();
+                            wlan_stop_sta();
+                            wlan_start_ap(key->valuestring);
+                        } else {
+                            LOGW("No AP key configured!");
+                        }
+                        fs_free_wifi_cfg(false);
                     } else if (mode == WIFI_MODE_AP) {
                         http_stop();
                         wlan_stop_ap();
