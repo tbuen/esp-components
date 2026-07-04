@@ -253,16 +253,17 @@ static esp_err_t file_put_handler(httpd_req_t *req) {
             if (len < chunk) {
                 chunk = len;
             }
-            if (httpd_req_recv(req, web_buffer, chunk) == chunk) {
-                if (fs_web_write(fd, web_buffer, chunk) != chunk) {
+            int16_t received = httpd_req_recv(req, web_buffer, chunk);
+            if (received > 0) {
+                if (fs_web_write(fd, web_buffer, received) != received) {
                     httpd_resp_set_status(req, HTTPD_507);
                     error = true;
                 }
+                len -= received;
             } else {
                 httpd_resp_set_status(req, HTTPD_500);
                 error = true;
             }
-            len -= chunk;
         }
         fs_web_close(fd);
         if (error) {
