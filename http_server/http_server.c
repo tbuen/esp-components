@@ -156,24 +156,19 @@ void http_stop(void) {
 void http_close(int sockfd) {
     if (!server) return;
 
-    size_t fds = MAX_CLIENT_CONNECTIONS;
-    int client_fds[MAX_CLIENT_CONNECTIONS];
-    ESP_ERROR_CHECK(httpd_get_client_list(server, &fds, client_fds));
-
-    for (size_t i = 0; i < fds; ++i) {
-        if (httpd_ws_get_fd_info(server, client_fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
-            httpd_ws_frame_t ws_pkt = {
-                .final = true,
-                .fragmented = false,
-                .type = HTTPD_WS_TYPE_CLOSE,
-                .payload = NULL,
-                .len = 0
-            };
-            httpd_ws_send_data(server, client_fds[i], &ws_pkt);
-            vTaskDelay(pdMS_TO_TICKS(100));
-        }
-        httpd_sess_trigger_close(server, client_fds[i]);
+    if (httpd_ws_get_fd_info(server, sockfd) == HTTPD_WS_CLIENT_WEBSOCKET) {
+        httpd_ws_frame_t ws_pkt = {
+            .final = true,
+            .fragmented = false,
+            .type = HTTPD_WS_TYPE_CLOSE,
+            .payload = NULL,
+            .len = 0
+        };
+        httpd_ws_send_data(server, sockfd, &ws_pkt);
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
+
+    httpd_sess_trigger_close(server, sockfd);
 }
 
 void http_send_ws_msg(con_id_t con, const char *text) {
