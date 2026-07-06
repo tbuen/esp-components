@@ -76,11 +76,11 @@ char *json_rpc_handle_request(void *ctx, const char *request) {
             }
             if (cfg->method && cfg->handler && cfg->result_builder) {
                 void *parameters = NULL;
-                if (cfg->param_parser && params) {
+                if (cfg->param_parser) {
                     if (!(parameters = cfg->param_parser(params))) {
                         response = json_rpc_build_error_msg(JSON_RPC_INVALID_PARAMS, idptr);
                     }
-                } else if (cfg->param_parser || params) {
+                } else if (params) {
                     response = json_rpc_build_error_msg(JSON_RPC_INVALID_PARAMS, idptr);
                 }
                 if (!response) {

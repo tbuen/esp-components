@@ -244,7 +244,7 @@ static void wlan_scan(void) {
         ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&ap_count, records));
         LOGI("found %d APs", ap_count);
         for (int i = 0; i < ap_count; ++i) {
-            LOGI("FOUND AP: SSID %s CH %d RSSI %d WPS %d AUTH %d, CC %s", records[i].ssid, records[i].primary, records[i].rssi, records[i].wps, records[i].authmode, records[i].country.cc);
+            LOGD("FOUND AP: SSID %s CH %d RSSI %d WPS %d AUTH %d, CC %s", records[i].ssid, records[i].primary, records[i].rssi, records[i].wps, records[i].authmode, records[i].country.cc);
             memcpy(ap_list[i].ssid, records[i].ssid, sizeof(ap_list[i].ssid));
             ap_list[i].rssi = records[i].rssi;
         }
