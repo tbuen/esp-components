@@ -8,7 +8,7 @@
 ***************************/
 
 #define MAX_HANDLES     20
-#define MAX_MESSAGES    10
+#define MAX_MESSAGES    20
 
 /***************************
 ***** MACROS ***************
