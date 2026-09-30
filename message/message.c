@@ -68,10 +68,15 @@ msg_handle_t msg_listen(msg_type_t msg_types) {
 }
 
 void msg_send_value(msg_type_t msg_type, uint32_t value) {
+    msg_send_value_with_data(msg_type, value, 0);
+}
+
+void msg_send_value_with_data(msg_type_t msg_type, uint32_t value, uint32_t data) {
     xSemaphoreTake(mutex, portMAX_DELAY);
     msg_t msg = {
         .type = msg_type,
-        .value = value
+        .value = value,
+        .data = data
     };
     for (int i = 0; i < next_handle; ++i) {
         if (receiver[i].types & msg_type) {
