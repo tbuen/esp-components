@@ -66,7 +66,7 @@ msg_type_t con_msg_type(void) {
 void con_create(con_mode_t mode, int sockfd) {
     bool created = false;
     if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        for (int i = 0; i < sizeof(connection)/sizeof(connection_t); ++i) {
+        for (int i = 0; i < MAX_CLIENT_CONNECTIONS; ++i) {
             if (!connection[i].con) {
                 connection[i].con = next_con++;
                 connection[i].mode = mode;
@@ -88,7 +88,7 @@ void con_create(con_mode_t mode, int sockfd) {
 void con_delete(int sockfd) {
     bool deleted = false;
     if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        for (int i = 0; i < sizeof(connection)/sizeof(connection_t); ++i) {
+        for (int i = 0; i < MAX_CLIENT_CONNECTIONS; ++i) {
             if (connection[i].con && connection[i].sockfd == sockfd) {
                 LOGI("delete con %lu socket %d", connection[i].con, connection[i].sockfd);
                 memset(&connection[i], 0, sizeof(connection_t));
@@ -107,7 +107,7 @@ void con_delete(int sockfd) {
 size_t con_count(void) {
     size_t count = 0;
     if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        for (int i = 0; i < sizeof(connection)/sizeof(connection_t); ++i) {
+        for (int i = 0; i < MAX_CLIENT_CONNECTIONS; ++i) {
             if (connection[i].con) {
                 count++;
             }
@@ -123,10 +123,10 @@ size_t con_get_all(con_id_t **cons) {
     size_t count = 0;
     *cons = NULL;
     if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        *cons = calloc(1, sizeof(con_id_t) * MAX_CLIENT_CONNECTIONS);
-        for (int i = 0; i < sizeof(connection)/sizeof(connection_t); ++i) {
+        *cons = calloc(MAX_CLIENT_CONNECTIONS, sizeof(con_id_t));
+        for (int i = 0; i < MAX_CLIENT_CONNECTIONS; ++i) {
             if (connection[i].con) {
-                *cons[count] = connection[i].con;
+                (*cons)[count] = connection[i].con;
                 count++;
             }
         }
@@ -142,7 +142,7 @@ size_t con_get_all(con_id_t **cons) {
 bool con_get_con(int sockfd, con_id_t *con) {
     bool found = false;
     if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        for (int i = 0; i < sizeof(connection)/sizeof(connection_t); ++i) {
+        for (int i = 0; i < MAX_CLIENT_CONNECTIONS; ++i) {
             if (connection[i].sockfd == sockfd) {
                 *con = connection[i].con;
                 found = true;
@@ -157,7 +157,7 @@ bool con_get_con(int sockfd, con_id_t *con) {
 bool con_get_sock(con_id_t con, int *sockfd) {
     bool found = false;
     if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        for (int i = 0; i < sizeof(connection)/sizeof(connection_t); ++i) {
+        for (int i = 0; i < MAX_CLIENT_CONNECTIONS; ++i) {
             if (connection[i].con == con) {
                 *sockfd = connection[i].sockfd;
                 found = true;
@@ -172,7 +172,7 @@ bool con_get_sock(con_id_t con, int *sockfd) {
 bool con_get_mode(con_id_t con, con_mode_t *mode) {
     bool found = false;
     if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        for (int i = 0; i < sizeof(connection)/sizeof(connection_t); ++i) {
+        for (int i = 0; i < MAX_CLIENT_CONNECTIONS; ++i) {
             if (connection[i].con == con) {
                 *mode = connection[i].mode;
                 found = true;
@@ -186,7 +186,7 @@ bool con_get_mode(con_id_t con, con_mode_t *mode) {
 
 void con_ping(con_id_t con) {
     if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        for (int i = 0; i < sizeof(connection)/sizeof(connection_t); ++i) {
+        for (int i = 0; i < MAX_CLIENT_CONNECTIONS; ++i) {
             if (connection[i].con == con) {
                 connection[i].last_action = pdTICKS_TO_MS(xTaskGetTickCount());
                 break;
@@ -200,7 +200,7 @@ bool con_stale(int *sockfd) {
     bool found = false;
     int stale_time = pdTICKS_TO_MS(xTaskGetTickCount()) - CONNECTION_TIMEOUT * 1000;
     if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        for (int i = 0; i < sizeof(connection)/sizeof(connection_t); ++i) {
+        for (int i = 0; i < MAX_CLIENT_CONNECTIONS; ++i) {
             if (connection[i].con && connection[i].last_action < stale_time) {
                 LOGI("con %lu socket %d is stale", connection[i].con, connection[i].sockfd);
                 *sockfd = connection[i].sockfd;
