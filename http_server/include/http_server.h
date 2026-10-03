@@ -30,3 +30,4 @@ void        http_start(con_mode_t mode);
 void        http_stop(void);
 void        http_close(int sockfd);
 void        http_send_ws_msg(con_id_t con, const char *text);
+void        http_send_ws_notif(con_id_t con, const char *text);

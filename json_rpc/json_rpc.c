@@ -107,6 +107,20 @@ char *json_rpc_handle_request(void *ctx, const char *request) {
     return response;
 }
 
+char *json_rpc_build_notif(const char *method, cJSON *params) {
+    cJSON *ntfn = cJSON_CreateObject();
+
+    cJSON_AddStringToObject(ntfn, "jsonrpc", "2.0");
+    cJSON_AddStringToObject(ntfn, "method", method);
+    if (params) {
+        cJSON_AddItemToObject(ntfn, "params", params);
+    }
+
+    char *notif = cJSON_PrintUnformatted(ntfn);
+    cJSON_Delete(ntfn);
+    return notif;
+}
+
 /***************************
 ***** LOCAL FUNCTIONS ******
 ***************************/

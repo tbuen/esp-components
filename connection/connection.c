@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "connection.h"
+#include "message.h"
 
 /***************************
 ***** CONSTANTS ************
@@ -72,7 +73,7 @@ void con_create(con_mode_t mode, int sockfd) {
                 connection[i].sockfd = sockfd;
                 connection[i].last_action = pdTICKS_TO_MS(xTaskGetTickCount());
                 LOGI("create con %lu mode %d socket %d", connection[i].con, connection[i].mode, connection[i].sockfd);
-                msg_send_value(msg_type, CON_CONNECTED);
+                msg_send_value_with_data(msg_type, CON_CONNECTED, connection[i].con);
                 created = true;
                 break;
             }
@@ -114,6 +115,27 @@ size_t con_count(void) {
         xSemaphoreGive(mutex);
     }
     LOGD("count %d", count);
+    return count;
+}
+
+size_t con_get_all(con_id_t **cons) {
+    assert(cons);
+    size_t count = 0;
+    *cons = NULL;
+    if (xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        *cons = calloc(1, sizeof(con_id_t) * MAX_CLIENT_CONNECTIONS);
+        for (int i = 0; i < sizeof(connection)/sizeof(connection_t); ++i) {
+            if (connection[i].con) {
+                *cons[count] = connection[i].con;
+                count++;
+            }
+        }
+        xSemaphoreGive(mutex);
+        if (!count) {
+            free(*cons);
+            *cons = NULL;
+        }
+    }
     return count;
 }
 

@@ -37,3 +37,4 @@ typedef struct {
 
 void json_rpc_init(const json_rpc_config_t *cfg, const json_rpc_error_config_t *err_cfg);
 char *json_rpc_handle_request(void *ctx, const char *request);
+char *json_rpc_build_notif(const char *method, cJSON *params);

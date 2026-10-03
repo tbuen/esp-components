@@ -190,6 +190,21 @@ void http_send_ws_msg(con_id_t con, const char *text) {
     }
 }
 
+void http_send_ws_notif(con_id_t con, const char *text) {
+    if (con == CON_ALL_CLIENTS) {
+        con_id_t *cons = NULL;
+        size_t count = con_get_all(&cons);
+        if (count) {
+            for (int i = 0; i < count; ++i) {
+                http_send_ws_msg(cons[i], text);
+            }
+            free(cons);
+        }
+    } else {
+        http_send_ws_msg(con, text);
+    }
+}
+
 /***************************
 ***** LOCAL FUNCTIONS ******
 ***************************/
